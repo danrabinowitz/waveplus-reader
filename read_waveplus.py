@@ -31,6 +31,7 @@ import sys
 import time
 import struct
 import tableprint
+import os
 
 # ===============================
 # Script guards for correct usage
@@ -144,6 +145,7 @@ class WavePlus():
             sys.exit(1)            
         rawdata = self.curr_val_char.read()
         rawdata = struct.unpack('BBBBHHHHHHHH', rawdata)
+        #print(rawdata)
         sensors = Sensors()
         sensors.set(rawdata)
         return sensors
@@ -217,32 +219,60 @@ try:
         print header
         
     while True:
+        try:
+            waveplus.connect()
         
-        waveplus.connect()
+            # read values
+            sensors = waveplus.read()
         
-        # read values
-        sensors = waveplus.read()
+            # extract
+            humidity     = str(sensors.getValue(SENSOR_IDX_HUMIDITY))             + " " + str(sensors.getUnit(SENSOR_IDX_HUMIDITY))
+            radon_st_avg = str(sensors.getValue(SENSOR_IDX_RADON_SHORT_TERM_AVG)) + " " + str(sensors.getUnit(SENSOR_IDX_RADON_SHORT_TERM_AVG))
+            radon_lt_avg = str(sensors.getValue(SENSOR_IDX_RADON_LONG_TERM_AVG))  + " " + str(sensors.getUnit(SENSOR_IDX_RADON_LONG_TERM_AVG))
+            temperature  = str(sensors.getValue(SENSOR_IDX_TEMPERATURE))          + " " + str(sensors.getUnit(SENSOR_IDX_TEMPERATURE))
+            pressure     = str(sensors.getValue(SENSOR_IDX_REL_ATM_PRESSURE))     + " " + str(sensors.getUnit(SENSOR_IDX_REL_ATM_PRESSURE))
+            CO2_lvl      = str(sensors.getValue(SENSOR_IDX_CO2_LVL))              + " " + str(sensors.getUnit(SENSOR_IDX_CO2_LVL))
+            VOC_lvl      = str(sensors.getValue(SENSOR_IDX_VOC_LVL))              + " " + str(sensors.getUnit(SENSOR_IDX_VOC_LVL))
         
-        # extract
-        humidity     = str(sensors.getValue(SENSOR_IDX_HUMIDITY))             + " " + str(sensors.getUnit(SENSOR_IDX_HUMIDITY))
-        radon_st_avg = str(sensors.getValue(SENSOR_IDX_RADON_SHORT_TERM_AVG)) + " " + str(sensors.getUnit(SENSOR_IDX_RADON_SHORT_TERM_AVG))
-        radon_lt_avg = str(sensors.getValue(SENSOR_IDX_RADON_LONG_TERM_AVG))  + " " + str(sensors.getUnit(SENSOR_IDX_RADON_LONG_TERM_AVG))
-        temperature  = str(sensors.getValue(SENSOR_IDX_TEMPERATURE))          + " " + str(sensors.getUnit(SENSOR_IDX_TEMPERATURE))
-        pressure     = str(sensors.getValue(SENSOR_IDX_REL_ATM_PRESSURE))     + " " + str(sensors.getUnit(SENSOR_IDX_REL_ATM_PRESSURE))
-        CO2_lvl      = str(sensors.getValue(SENSOR_IDX_CO2_LVL))              + " " + str(sensors.getUnit(SENSOR_IDX_CO2_LVL))
-        VOC_lvl      = str(sensors.getValue(SENSOR_IDX_VOC_LVL))              + " " + str(sensors.getUnit(SENSOR_IDX_VOC_LVL))
+            # Print data
+            data = [humidity, radon_st_avg, radon_lt_avg, temperature, pressure, CO2_lvl, VOC_lvl]
         
-        # Print data
-        data = [humidity, radon_st_avg, radon_lt_avg, temperature, pressure, CO2_lvl, VOC_lvl]
+            if (Mode=='terminal'):
+                print tableprint.row(data, width=12)
+            elif (Mode=='pipe'):
+                print data
+                sys.stdout.flush()
+
+            if (SerialNumber==2930032685):
+                name="Office"
+            elif (SerialNumber==2930032820):
+                name="Mobile"
+            else:
+                name="unknown"
+
+            with open('/var/lib/prometheus/node-exporter/waveplus_sensor_metrics_%s.prom_partial' % SerialNumber, 'w') as f:
+                f.write("waveplus_sensor_relative_humidity{serial_number=\"%s\", device_name=\"%s\"} %0.1f\n" % (SerialNumber, name, sensors.getValue(SENSOR_IDX_HUMIDITY)))
+                f.write("waveplus_sensor_radon_st_avg{serial_number=\"%s\", device_name=\"%s\"} %0.0f\n" % (SerialNumber, name, sensors.getValue(SENSOR_IDX_RADON_SHORT_TERM_AVG)))
+                f.write("waveplus_sensor_radon_lt_avg{serial_number=\"%s\", device_name=\"%s\"} %0.0f\n" % (SerialNumber, name, sensors.getValue(SENSOR_IDX_RADON_LONG_TERM_AVG)))
+                f.write("waveplus_sensor_temperature_degc{serial_number=\"%s\", device_name=\"%s\"} %0.2f\n" % (SerialNumber, name, sensors.getValue(SENSOR_IDX_TEMPERATURE)))
+                f.write("waveplus_sensor_temperature_degf{serial_number=\"%s\", device_name=\"%s\"} %0.2f\n" % (SerialNumber, name, sensors.getValue(SENSOR_IDX_TEMPERATURE)*9/5+32))
+                f.write("waveplus_sensor_pressure_hpa{serial_number=\"%s\", device_name=\"%s\"} %0.2f\n" % (SerialNumber, name, sensors.getValue(SENSOR_IDX_REL_ATM_PRESSURE)))
+                f.write("waveplus_sensor_co2_level_ppm{serial_number=\"%s\", device_name=\"%s\"} %0.1f\n" % (SerialNumber, name, sensors.getValue(SENSOR_IDX_CO2_LVL)))
+                f.write("waveplus_sensor_voc_level_ppb{serial_number=\"%s\", device_name=\"%s\"} %0.1f\n" % (SerialNumber, name, sensors.getValue(SENSOR_IDX_VOC_LVL)))
+
+
+            os.system('cat /var/lib/prometheus/node-exporter/waveplus_sensor_metrics_*.prom_partial > /var/lib/prometheus/node-exporter/waveplus_sensor_metrics.prom')
+
+
+
+            waveplus.disconnect()
         
-        if (Mode=='terminal'):
-            print tableprint.row(data, width=12)
-        elif (Mode=='pipe'):
-            print data
-        
-        waveplus.disconnect()
-        
-        time.sleep(SamplePeriod)
+            time.sleep(SamplePeriod)
+        except KeyboardInterrupt:
+            raise
+        except:
+            print "Caught error"
+            continue
             
 finally:
     waveplus.disconnect()
